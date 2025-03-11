@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -347,4 +348,233 @@
                 
                 try {
                     const weatherResponse = await fetch(
-                        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=temperature_2
+                        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=temperature_2m,relativehumidity_2m,precipitation,weathercode,visibility,windspeed_10m&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&current_weather=true&timezone=auto`
+                    );
+                    
+                    if (!weatherResponse.ok) {
+                        throw new Error('Weather API request failed');
+                    }
+                    
+                    const weatherData = await weatherResponse.json();
+                    displayWeatherData(weatherData, city, country);
+                    addToRecentSearches(city, country, latitude, longitude);
+                    
+                } catch (error) {
+                    console.error('Error fetching weather data:', error);
+                    showError('Unable to fetch weather data. Please try again.');
+                } finally {
+                    hideLoading();
+                }
+            }
+            
+            // Display weather data
+            function displayWeatherData(data, city, country) {
+                weatherContainer.classList.remove('hidden');
+                
+                // Current weather
+                const current = data.current_weather;
+                const currentWeatherCode = current.weathercode;
+                
+                locationName.textContent = country ? `${city}, ${country}` : city;
+                currentDate.textContent = formatDate(current.time);
+                currentTemp.textContent = Math.round(current.temperature);
+                weatherDescription.textContent = weatherDescriptions[currentWeatherCode] || 'Unknown';
+                currentWeatherIcon.innerHTML = weatherIcons[currentWeatherCode] || '<i class="fas fa-cloud"></i>';
+                
+                windSpeed.textContent = `${Math.round(current.windspeed)} km/h`;
+                
+                // Find current hour index
+                const currentHourIndex = data.hourly.time.findIndex(time => 
+                    time.startsWith(current.time.split('T')[0])
+                );
+                
+                humidity.textContent = `${data.hourly.relativehumidity_2m[currentHourIndex]}%`;
+                visibility.textContent = `${(data.hourly.visibility[currentHourIndex] / 1000).toFixed(1)} km`;
+                
+                // Daily data
+                const today = data.daily.time[0];
+                minTemp.textContent = `${Math.round(data.daily.temperature_2m_min[0])}°C`;
+                maxTemp.textContent = `${Math.round(data.daily.temperature_2m_max[0])}°C`;
+                precipitation.textContent = `${data.daily.precipitation_sum[0]} mm`;
+                
+                // 7-day forecast
+                forecastContainer.innerHTML = '';
+                for (let i = 0; i < 7; i++) {
+                    const forecastDay = document.createElement('div');
+                    forecastDay.className = 'bg-white dark:bg-dark-card rounded-lg shadow-sm p-3 text-center';
+                    forecastDay.innerHTML = `
+                        <p class="font-medium">${i === 0 ? 'Today' : formatDay(data.daily.time[i])}</p>
+                        <div class="text-3xl my-2">${weatherIcons[data.daily.weathercode[i]]}</div>
+                        <div class="flex justify-center space-x-2">
+                            <span class="font-bold">${Math.round(data.daily.temperature_2m_max[i])}°</span>
+                            <span class="text-gray-500 dark:text-gray-400">${Math.round(data.daily.temperature_2m_min[i])}°</span>
+                        </div>
+                    `;
+                    forecastContainer.appendChild(forecastDay);
+                }
+                
+                // Hourly forecast (for today)
+                hourlyForecast.innerHTML = '';
+                const startHour = new Date().getHours();
+                const hourlyLimit = Math.min(startHour + 24, data.hourly.time.length);
+                
+                for (let i = startHour; i < hourlyLimit; i++) {
+                    const time = data.hourly.time[i].split('T')[1];
+                    const hourlyTemp = data.hourly.temperature_2m[i];
+                    const hourlyWeatherCode = data.hourly.weathercode[i];
+                    
+                    const hourlyItem = document.createElement('div');
+                    hourlyItem.className = 'text-center flex flex-col items-center';
+                    hourlyItem.innerHTML = `
+                        <p class="text-sm text-gray-600 dark:text-gray-400">${formatHour(time)}</p>
+                        <div class="text-xl my-2">${weatherIcons[hourlyWeatherCode]}</div>
+                        <p class="font-bold">${Math.round(hourlyTemp)}°</p>
+                    `;
+                    hourlyForecast.appendChild(hourlyItem);
+                }
+            }
+            
+            // Add to recent searches
+            function addToRecentSearches(city, country, latitude, longitude) {
+                const locationData = {
+                    city,
+                    country,
+                    latitude,
+                    longitude
+                };
+                
+                // Check if already exists
+                const existingIndex = recentSearches.findIndex(item => 
+                    item.city === city && item.country === country
+                );
+                
+                if (existingIndex !== -1) {
+                    // Remove existing entry
+                    recentSearches.splice(existingIndex, 1);
+                }
+                
+                // Add to beginning of array
+                recentSearches.unshift(locationData);
+                
+                // Keep only 5 most recent
+                if (recentSearches.length > 5) {
+                    recentSearches.pop();
+                }
+                
+                updateRecentSearchesUI();
+            }
+            
+            // Update recent searches UI
+            function updateRecentSearchesUI() {
+                recentSearchesContainer.innerHTML = '';
+                
+                if (recentSearches.length === 0) {
+                    recentSearchesContainer.innerHTML = `
+                        <p class="text-gray-500 dark:text-gray-400 text-sm">Your recent search locations will appear here</p>
+                    `;
+                    return;
+                }
+                
+                recentSearches.forEach(search => {
+                    const searchItem = document.createElement('button');
+                    searchItem.className = 'w-full text-left px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center';
+                    searchItem.innerHTML = `
+                        <i class="fas fa-history text-gray-500 mr-2"></i>
+                        <span>${search.city}${search.country ? `, ${search.country}` : ''}</span>
+                    `;
+                    searchItem.addEventListener('click', () => {
+                        getWeatherData(search.latitude, search.longitude, search.city, search.country);
+                    });
+                    recentSearchesContainer.appendChild(searchItem);
+                });
+            }
+            
+            // Show loading indicator
+            function showLoading() {
+                loadingIndicator.classList.remove('hidden');
+                weatherContainer.classList.add('hidden');
+            }
+            
+            // Hide loading indicator
+            function hideLoading() {
+                loadingIndicator.classList.add('hidden');
+            }
+            
+            // Show error message
+            function showError(message) {
+                errorText.textContent = message;
+                errorMessage.classList.remove('hidden');
+            }
+            
+            // Hide error message
+            function hideError() {
+                errorMessage.classList.add('hidden');
+            }
+            
+            // Event listeners
+            searchForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                searchSuggestions.classList.add('hidden');
+                
+                const query = locationInput.value.trim();
+                if (!query) return;
+                
+                try {
+                    const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1`);
+                    const data = await response.json();
+                    
+                    if (data.results && data.results.length > 0) {
+                        const location = data.results[0];
+                        getWeatherData(location.latitude, location.longitude, location.name, location.country);
+                    } else {
+                        showError('Location not found. Please try a different city name.');
+                    }
+                } catch (error) {
+                    console.error('Error searching for location:', error);
+                    showError('Error searching for location. Please try again.');
+                }
+            });
+            
+            locationInput.addEventListener('input', function() {
+                const query = this.value.trim();
+                if (query.length >= 3) {
+                    searchLocations(query);
+                } else {
+                    searchSuggestions.classList.add('hidden');
+                }
+            });
+            
+            document.addEventListener('click', function(e) {
+                if (!searchSuggestions.contains(e.target) && e.target !== locationInput) {
+                    searchSuggestions.classList.add('hidden');
+                }
+            });
+            
+            // Handle popular city buttons
+            popularCityBtns.forEach(btn => {
+                btn.addEventListener('click', async function() {
+                    const city = this.dataset.city;
+                    try {
+                        const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`);
+                        const data = await response.json();
+                        
+                        if (data.results && data.results.length > 0) {
+                            const location = data.results[0];
+                            locationInput.value = location.name;
+                            getWeatherData(location.latitude, location.longitude, location.name, location.country);
+                        }
+                    } catch (error) {
+                        console.error('Error searching for popular city:', error);
+                        showError('Error searching for location. Please try again.');
+                    }
+                });
+            });
+            
+            // Load Tokyo as default on page load
+            setTimeout(() => {
+                document.querySelector('[data-city="Shenzen"]').click();
+            }, 500);
+        });
+    </script>
+</body>
+</html>
